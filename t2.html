@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Symbols Remover</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="bg-white w-full max-w-3xl rounded-2xl shadow-xl border border-slate-200 p-6 md:p-8 flex flex-col gap-6">
+        
+        <!-- Title -->
+        <h1 class="text-2xl font-bold text-slate-900 text-center">Symbols Remover</h1>
+
+        <!-- Input Section -->
+        <div class="flex flex-col gap-2">
+            <label for="input-box" class="text-sm font-semibold text-slate-700">Paste your paragraph:</label>
+            <textarea id="input-box" rows="8" class="w-full p-4 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-sm text-slate-700 resize-y" placeholder="Type or paste text here..."></textarea>
+        </div>
+
+        <!-- Buttons Frame: Clear, Paste, Remove, Copy (All styled like Remove) -->
+        <div class="flex flex-wrap items-center justify-center gap-3 py-2">
+            <!-- 1. Clear -->
+            <button onclick="clearText()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition shadow-md shadow-indigo-100">
+                Clear
+            </button>
+            
+            <!-- 2. Paste -->
+            <button onclick="pasteText()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition shadow-md shadow-indigo-100">
+                Paste
+            </button>
+            
+            <!-- 3. Remove -->
+            <button onclick="removeSymbols()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition shadow-md shadow-indigo-100">
+                Remove
+            </button>
+            
+            <!-- 4. Copy -->
+            <button onclick="copyResult()" class="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl text-sm transition shadow-md shadow-indigo-100">
+                Copy
+            </button>
+        </div>
+
+        <!-- Result Section -->
+        <div class="flex flex-col gap-2">
+            <label for="output-box" class="text-sm font-semibold text-slate-700">Result:</label>
+            <textarea id="output-box" rows="8" readonly class="w-full p-4 border border-slate-300 rounded-xl focus:outline-none text-sm text-slate-700 bg-slate-50 resize-y" placeholder="Cleaned text will appear here..."></textarea>
+        </div>
+
+        <!-- Status -->
+        <div class="text-center">
+            <span id="status-label" class="text-sm font-medium text-slate-600"></span>
+        </div>
+
+    </div>
+
+    <script>
+        // DOM Elements
+        const inputBox = document.getElementById('input-box');
+        const outputBox = document.getElementById('output-box');
+        const statusLabel = document.getElementById('status-label');
+
+        function removeSymbols() {
+            let text = inputBox.value;
+
+            // Replace & with "and"
+            text = text.replace(/&/g, " and ");
+
+            // Convert hyphens (-) to a single space so hyphenated words leave a space instead of merging
+            text = text.replace(/-/g, " ");
+
+            // Remove all symbols keeping only letters, numbers, and spaces
+            let cleaned = text.replace(/[^A-Za-z0-9\s]/g, "");
+
+            // Remove extra spaces & trim
+            cleaned = cleaned.replace(/\s+/g, " ").trim();
+
+            outputBox.value = cleaned;
+            statusLabel.textContent = "Symbols removed";
+            statusLabel.className = "text-sm font-medium text-emerald-600";
+        }
+
+        function clearText() {
+            inputBox.value = "";
+            outputBox.value = "";
+            statusLabel.textContent = "";
+        }
+
+        async function pasteText() {
+            try {
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    const clipboardText = await navigator.clipboard.readText();
+                    inputBox.value = clipboardText;
+                    statusLabel.textContent = "Text pasted";
+                    statusLabel.className = "text-sm font-medium text-indigo-600";
+                } else {
+                    statusLabel.textContent = "Clipboard is empty";
+                    statusLabel.className = "text-sm font-medium text-amber-600";
+                }
+            } catch (err) {
+                statusLabel.textContent = "Clipboard is empty";
+                statusLabel.className = "text-sm font-medium text-amber-600";
+            }
+        }
+
+        function copyResult() {
+            const result = outputBox.value.trim();
+
+            if (result) {
+                if (navigator.clipboard && navigator.clipboard.writeText) {
+                    navigator.clipboard.writeText(result).then(() => {
+                        statusLabel.textContent = "Copied to clipboard!";
+                        statusLabel.className = "text-sm font-medium text-emerald-600";
+                    }).catch(() => {
+                        fallbackCopy(result);
+                    });
+                } else {
+                    fallbackCopy(result);
+                }
+            } else {
+                statusLabel.textContent = "Nothing to copy";
+                statusLabel.className = "text-sm font-medium text-amber-600";
+            }
+        }
+
+        function fallbackCopy(text) {
+            outputBox.select();
+            try {
+                document.execCommand('copy');
+                statusLabel.textContent = "Copied to clipboard!";
+                statusLabel.className = "text-sm font-medium text-emerald-600";
+            } catch (err) {
+                statusLabel.textContent = "Nothing to copy";
+                statusLabel.className = "text-sm font-medium text-amber-600";
+            }
+        }
+    </script>
+</body>
+</html>
