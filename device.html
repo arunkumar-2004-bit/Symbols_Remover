@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>P2P Device Link & Data Streamer</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f0fdf4',
+                            100: '#dcfce7',
+                            500: '#22c55e',
+                            600: '#16a34a',
+                            700: '#15803d',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- PeerJS CDN for WebRTC P2P Data & Media Channels -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <!-- QRCode Generator library for visual link sharing -->
+    <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
+    <!-- FontAwesome for clean icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-brand-500 selection:text-white">
+
+    <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-gradient-to-tr from-brand-600 to-emerald-400 p-2.5 rounded-2xl shadow-lg shadow-brand-500/20">
+                    <i class="fa-solid fa-link text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">DeviceLink P2P</h1>
+                    <p class="text-xs text-slate-400">Direct Browser-to-Browser Data Streamer</p>
+                </div>
+            </div>
+            <div id="connectionStatusBadge" class="hidden items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium">
+                <span class="w-2 h-2 rounded-full bg-amber-500 animate-pulse" id="statusDot"></span>
+                <span id="statusText">Initializing...</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-grow max-w-6xl w-full mx-auto px-4 py-8">
+        
+        <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+        <!-- Role Selection Screen -->
+        <div id="roleSelectionView" class="max-w-2xl mx-auto py-12 text-center">
+            <div class="inline-flex p-3 rounded-full bg-slate-900 border border-slate-800 text-brand-500 mb-6 shadow-inner">
+                <i class="fa-solid fa-network-wired text-3xl"></i>
+            </div>
+            <h2 class="text-3xl font-extrabold tracking-tight mb-3">Connect Any Device Instantly</h2>
+            <p class="text-slate-400 mb-10 max-w-lg mx-auto text-sm">
+                Share files, stream live media, or send clipboard text securely between your phone and PC without intermediaries or cloud storage limits.
+            </p>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <!-- Host Card -->
+                <button onclick="app.initHost()" class="group relative bg-slate-900 border border-slate-800 hover:border-brand-500/50 p-6 rounded-3xl text-left transition-all duration-300 hover:shadow-xl hover:shadow-brand-500/10 flex flex-col justify-between">
+                    <div>
+                        <div class="w-12 h-12 rounded-2xl bg-brand-500/10 text-brand-500 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                            <i class="fa-solid fa-broadcast-tower text-xl"></i>
+                        </div>
+                        <h3 class="text-lg font-bold mb-1 text-slate-200 group-hover:text-white">Host Primary Device</h3>
+                        <p class="text-xs text-slate-400">Generate a secure unique link or QR code to share data from this device.</p>
+                    </div>
+                    <div class="mt-6 flex items-center text-xs font-semibold text-brand-500 group-hover:translate-x-1 transition-transform">
+                        <span>Start Hosting</span>
+                        <i class="fa-solid fa-arrow-right ml-2"></i>
+                    </div>
+                </button>
+
+                <!-- Client Card -->
+                <button onclick="app.showClientJoin()" class="group relative bg-slate-900 border border-slate-800 hover:border-sky-500/50 p-6 rounded-3xl text-left transition-all duration-300 hover:shadow-xl hover:shadow-sky-500/10 flex flex-col justify-between">
+                    <div>
+                        <div class="w-12 h-12 rounded-2xl bg-sky-500/10 text-sky-400 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                            <i class="fa-solid fa-mobile-screen-button text-xl"></i>
+                        </div>
+                        <h3 class="text-lg font-bold mb-1 text-slate-200 group-hover:text-white">Join as Client</h3>
+                        <p class="text-xs text-slate-400">Connect using a link or enter a room code from another device.</p>
+                    </div>
+                    <div class="mt-6 flex items-center text-xs font-semibold text-sky-400 group-hover:translate-x-1 transition-transform">
+                        <span>Connect Device</span>
+                        <i class="fa-solid fa-arrow-right ml-2"></i>
+                    </div>
+                </button>
+            </div>
+        </div>
+
+        <div id="clientJoinView" class="hidden max-w-md mx-auto py-12">
+            <div class="bg-slate-900 border border-slate-800 p-8 rounded-3xl shadow-2xl">
+                <div class="flex items-center justify-between mb-6">
+                    <h3 class="text-xl font-bold">Connect to Host Room</h3>
+                    <button onclick="app.resetToRoleSelection()" class="text-slate-400 hover:text-white text-sm">
+                        <i class="fa-solid fa-xmark text-lg"></i>
+                    </button>
+                </div>
+                <p class="text-xs text-slate-400 mb-6">Enter the room code provided by the host device or paste the complete link.</p>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-xs font-medium text-slate-300 mb-1.5">Room ID or Full Link</label>
+                        <input type="text" id="manualRoomInput" placeholder="e.g. room-abc123xyz" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-sm focus:outline-none focus:border-brand-500 transition-colors">
+                    </div>
+                    <button onclick="app.joinWithManualInput()" class="w-full bg-brand-600 hover:bg-brand-500 text-white font-semibold py-3 rounded-xl transition-colors shadow-lg shadow-brand-600/20 text-sm">
+                        Connect Now
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="workspaceView" class="hidden grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Left Column: Connection & Info / Host Controls -->
+            <div class="space-y-6">
+                <!-- Room Credentials Card -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Connection Info</h3>
+                        <span id="roleBadge" class="px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider">Host</span>
+                    </div>
+                    
+                    <div id="hostLinkContainer" class="space-y-4">
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-1">Shareable Link</label>
+                            <div class="flex items-center space-x-2">
+                                <input type="text" id="shareableLinkInput" readonly class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-300 focus:outline-none">
+                                <button onclick="app.copyShareableLink()" class="bg-slate-800 hover:bg-slate-700 p-2.5 rounded-xl transition-colors text-slate-200">
+                                    <i class="fa-solid fa-copy text-xs"></i>
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- QR Code Wrapper -->
+                        <div class="flex flex-col items-center justify-center pt-2">
+                            <div id="qrcode" class="bg-white p-3 rounded-2xl shadow-md"></div>
+                            <span class="text-[10px] text-slate-400 mt-2">Scan with another camera to connect</span>
+                        </div>
+                    </div>
+
+                    <div id="clientInfoContainer" class="hidden space-y-2">
+                        <p class="text-xs text-slate-400">Connected to Host Room:</p>
+                        <p id="currentRoomDisplay" class="font-mono text-sm font-bold text-brand-400 bg-slate-950 px-3 py-2 rounded-xl border border-slate-800"></p>
+                    </div>
+
+                    <div class="mt-6 pt-6 border-t border-slate-800 flex items-center justify-between">
+                        <div class="flex items-center space-x-2">
+                            <div id="peerIndicator" class="w-3 h-3 rounded-full bg-red-500"></div>
+                            <span id="peerStatusLabel" class="text-xs font-medium text-slate-300">Disconnected</span>
+                        </div>
+                        <button onclick="app.disconnectSession()" class="text-xs text-rose-400 hover:text-rose-300 font-medium">Disconnect</button>
+                    </div>
+                </div>
+
+                <!-- Host Stream Controls -->
+                <div id="hostControlsCard" class="hidden bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Broadcast Controls</h3>
+                    
+                    <div class="grid grid-cols-2 gap-3">
+                        <button onclick="app.toggleCameraShare()" id="camShareBtn" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 py-3 px-4 rounded-xl text-xs font-medium flex items-center justify-center space-x-2 transition-colors">
+                            <i class="fa-solid fa-video text-brand-400"></i>
+                            <span id="camBtnText">Share Camera</span>
+                        </button>
+                        <button onclick="app.toggleScreenShare()" id="screenShareBtn" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 py-3 px-4 rounded-xl text-xs font-medium flex items-center justify-center space-x-2 transition-colors">
+                            <i class="fa-solid fa-desktop text-sky-400"></i>
+                            <span id="screenBtnText">Share Screen</span>
+                        </button>
+                    </div>
+
+                    <!-- File Drop / Selector -->
+                    <div class="border-2 border-dashed border-slate-800 hover:border-brand-500/50 rounded-2xl p-4 text-center transition-colors relative">
+                        <input type="file" id="fileSelector" onchange="app.handleFileSelect(event)" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                        <div class="pointer-events-none space-y-1">
+                            <i class="fa-solid fa-cloud-arrow-up text-brand-500 text-xl"></i>
+                            <p class="text-xs font-medium text-slate-300">Click or drop file to send</p>
+                            <p class="text-[10px] text-slate-500">Any file format supported</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Stream Display Card -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg">
+                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Live Video Stream</h3>
+                    <div class="relative bg-slate-950 rounded-2xl overflow-hidden aspect-video border border-slate-800 flex items-center justify-center">
+                        <video id="remoteVideo" autoplay playsinline class="w-full h-full object-cover hidden"></video>
+                        <div id="videoPlaceholder" class="text-center p-4">
+                            <i class="fa-solid fa-video-slash text-slate-700 text-2xl mb-2"></i>
+                            <p class="text-xs text-slate-500">No active stream from peer</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Chat & File Transfer Log -->
+            <div class="lg:col-span-2 flex flex-col space-y-6">
+                
+                <!-- Shared File Transfers Box -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg flex flex-col h-[260px]">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
+                            <i class="fa-solid fa-folder-open text-brand-500"></i>
+                            <span>Transferred Files</span>
+                        </h3>
+                        <span id="fileCountBadge" class="bg-slate-800 text-slate-300 text-xs px-2 py-0.5 rounded-full font-mono">0 files</span>
+                    </div>
+                    
+                    <div id="fileListContainer" class="flex-grow overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                        <div id="noFilesMsg" class="h-full flex flex-col items-center justify-center text-slate-500 text-xs">
+                            <i class="fa-solid fa-box-open text-2xl mb-1"></i>
+                            <span>No files transferred yet</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Instant Messaging / Text Box -->
+                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg flex flex-col flex-grow min-h-[320px]">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400 flex items-center space-x-2">
+                            <i class="fa-solid fa-comments text-sky-400"></i>
+                            <span>P2P Secure Chat & Notes</span>
+                        </h3>
+                        <span class="text-[10px] text-slate-500 font-mono">Encrypted Data Channel</span>
+                    </div>
+
+                    <!-- Message Feed -->
+                    <div id="chatMessageFeed" class="flex-grow overflow-y-auto space-y-3 pr-2 mb-4 max-h-[220px] custom-scrollbar">
+                        <div class="text-center my-2">
+                            <span class="text-[10px] bg-slate-950 text-slate-500 px-3 py-1 rounded-full border border-slate-800">Connection established securely</span>
+                        </div>
+                    </div>
+
+                    <!-- Message Input Bar -->
+                    <div class="flex items-center space-x-2 pt-2 border-t border-slate-800">
+                        <input type="text" id="chatInput" onkeydown="app.handleChatKeyDown(event)" placeholder="Type a message or note to sync..." class="flex-grow bg-slate-950 border border-slate-800 rounded-xl px-4 py-3 text-xs focus:outline-none focus:border-brand-500 transition-colors">
+                        <button onclick="app.sendChatMessage()" class="bg-brand-600 hover:bg-brand-500 text-white px-5 py-3 rounded-xl transition-colors text-xs font-semibold shadow-md shadow-brand-600/20">
+                            Send
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </main>
+
+    <footer class="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
+        <p>Built with WebRTC & PeerJS. Direct browser connection—no data stored on servers.</p>
+    </footer>
+
+    <script>
+        class P2PApp {
+            constructor() {
+                this.peer = null;
+                this.conn = null;
+                this.localStream = null;
+                this.remoteStream = null;
+                this.isHost = false;
+                this.roomId = null;
+                this.incomingFileMeta = null;
+                this.incomingFileBuffers = [];
+                this.incomingFileSizeReceived = 0;
+
+                window.addEventListener('load', () => {
+                    const hash = window.location.hash.replace('#', '');
+                    if (hash && hash.startsWith('room-')) {
+                        document.getElementById('manualRoomInput').value = hash;
+                        this.showClientJoin();
+                    }
+                });
+            }
+
+            showToast(message, type = 'info') {
+                const container = document.getElementById('toastContainer');
+                const toast = document.createElement('div');
+                
+                let bgColor = 'bg-slate-900 border-slate-800 text-slate-200';
+                if (type === 'success') bgColor = 'bg-emerald-950 border-emerald-800 text-emerald-200';
+                if (type === 'error') bgColor = 'bg-rose-950 border-rose-800 text-rose-200';
+
+                toast.className = `pointer-events-auto border px-4 py-3 rounded-2xl shadow-2xl text-xs flex items-center space-x-2 transition-all transform translate-y-2 opacity-0 ${bgColor}`;
+                toast.innerHTML = `<i class="fa-solid fa-circle-info"></i><span>${message}</span>`;
+                
+                container.appendChild(toast);
+                setTimeout(() => toast.classList.remove('translate-y-2', 'opacity-0'), 50);
+                setTimeout(() => {
+                    toast.classList.add('translate-y-2', 'opacity-0');
+                    setTimeout(() => toast.remove(), 300);
+                }, 3500);
+            }
+
+            updateStatusBadge(state, text) {
+                const badge = document.getElementById('connectionStatusBadge');
+                const dot = document.getElementById('statusDot');
+                const label = document.getElementById('statusText');
+                
+                badge.classList.remove('hidden');
+                badge.classList.add('flex');
+                
+                if (state === 'waiting') {
+                    dot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
+                } else if (state === 'connected') {
+                    dot.className = "w-2 h-2 rounded-full bg-emerald-500";
+                } else {
+                    dot.className = "w-2 h-2 rounded-full bg-rose-500";
+                }
+                label.textContent = text;
+            }
+
+            updatePeerConnectionUI(isConnected) {
+                const indicator = document.getElementById('peerIndicator');
+                const label = document.getElementById('peerStatusLabel');
+                
+                if (isConnected) {
+                    indicator.className = "w-3 h-3 rounded-full bg-emerald-500 shadow-lg shadow-emerald-500/50";
+                    label.textContent = "Peer Connected";
+                    this.updateStatusBadge('connected', 'Device Connected');
+                } else {
+                    indicator.className = "w-3 h-3 rounded-full bg-rose-500";
+                    label.textContent = "Disconnected";
+                    this.updateStatusBadge('waiting', this.isHost ? 'Waiting for Peer...' : 'Connecting...');
+                }
+            }
+
+            generateRoomId() {
+                const randomStr = Math.random().toString(36).substring(2, 8);
+                return 'room-' + randomStr;
+            }
+
+            initHost() {
+                this.isHost = true;
+                this.roomId = this.generateRoomId();
+                
+                document.getElementById('roleSelectionView').classList.add('hidden');
+                document.getElementById('workspaceView').classList.remove('hidden');
+                document.getElementById('hostControlsCard').classList.remove('hidden');
+                document.getElementById('roleBadge').textContent = "Host";
+                document.getElementById('roleBadge').className = "px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-brand-500/10 text-brand-400 border border-brand-500/20";
+                
+                const shareUrl = window.location.origin + window.location.pathname + '#' + this.roomId;
+                document.getElementById('shareableLinkInput').value = shareUrl;
+
+                const qrContainer = document.getElementById('qrcode');
+                qrContainer.innerHTML = "";
+                try {
+                    const qr = qrcode(0, 'M');
+                    qr.addData(shareUrl);
+                    qr.make();
+                    qrContainer.innerHTML = qr.createSvgTag({ scalable: true });
+                    const svg = qrContainer.querySelector('svg');
+                    if(svg) { svg.style.width = "130px"; svg.style.height = "130px"; }
+                } catch(e) {
+                    qrContainer.innerHTML = "<span class='text-[10px] text-slate-900'>QR Code generation failed</span>";
+                }
+
+                document.getElementById('hostLinkContainer').classList.remove('hidden');
+                document.getElementById('clientInfoContainer').classList.add('hidden');
+
+                this.setupPeerInstance(this.roomId);
+            }
+
+            showClientJoin() {
+                document.getElementById('roleSelectionView').classList.add('hidden');
+                document.getElementById('clientJoinView').classList.remove('hidden');
+            }
+
+            resetToRoleSelection() {
+                if (this.peer) this.peer.destroy();
+                window.location.hash = "";
+                window.location.reload();
+            }
+
+            joinWithManualInput() {
+                let inputVal = document.getElementById('manualRoomInput').value.trim();
+                if (!inputVal) {
+                    this.showToast('Please enter a valid room ID or link', 'error');
+                    return;
+                }
+
+                if (inputVal.includes('#')) {
+                    inputVal = inputVal.split('#')[1];
+                }
+                if (!inputVal.startsWith('room-')) {
+                    inputVal = 'room-' + inputVal;
+                }
+
+                this.isHost = false;
+                this.roomId = inputVal;
+
+                document.getElementById('clientJoinView').classList.add('hidden');
+                document.getElementById('workspaceView').classList.remove('hidden');
+                document.getElementById('hostControlsCard').classList.add('hidden');
+                document.getElementById('roleBadge').textContent = "Client Viewer";
+                document.getElementById('roleBadge').className = "px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-sky-500/10 text-sky-400 border border-sky-500/20";
+                
+                document.getElementById('hostLinkContainer').classList.add('hidden');
+                document.getElementById('clientInfoContainer').classList.remove('hidden');
+                document.getElementById('currentRoomDisplay').textContent = this.roomId;
+
+                const clientPeerId = 'client-' + Math.random().toString(36).substring(2, 8);
+                this.setupPeerInstance(clientPeerId, true);
+            }
+
+            setupPeerInstance(peerId, isClient = false) {
+                this.updateStatusBadge('waiting', 'Connecting to network...');
+                
+                this.peer = new Peer(peerId, {
+                    debug: 1
+                });
+
+                this.peer.on('open', (id) => {
+                    this.showToast('Secure P2P Node Initialized', 'success');
+                    if (isClient) {
+                        this.connectToHostRoom(this.roomId);
+                    } else {
+                        this.updateStatusBadge('waiting', 'Waiting for peer connection...');
+                    }
+                });
+
+                this.peer.on('connection', (conn) => {
+                    this.handleIncomingConnection(conn);
+                });
+
+                this.peer.on('call', (call) => {
+                    call.answer(this.localStream);
+                    call.on('stream', (remoteStream) => {
+                        this.handleRemoteStream(remoteStream);
+                    });
+                });
+
+                this.peer.on('error', (err) => {
+                    console.error(err);
+                    this.showToast('Peer error: ' + err.type, 'error');
+                    this.updateStatusBadge('error', 'Connection Error');
+                });
+            }
+
+            connectToHostRoom(hostId) {
+                this.updateStatusBadge('waiting', 'Connecting to ' + hostId + '...');
+                const conn = this.peer.connect(hostId, { reliable: true });
+                this.handleIncomingConnection(conn);
+
+                if (this.localStream) {
+                    const call = this.peer.call(hostId, this.localStream);
+                    call.on('stream', (remoteStream) => {
+                        this.handleRemoteStream(remoteStream);
+                    });
+                } else {
+                    const call = this.peer.call(hostId, new MediaStream());
+                    call.on('stream', (remoteStream) => {
+                        this.handleRemoteStream(remoteStream);
+                    });
+                }
+            }
+
+            handleIncomingConnection(conn) {
+                this.conn = conn;
+
+                this.conn.on('open', () => {
+                    this.updatePeerConnectionUI(true);
+                    this.showToast('Peer connected securely!', 'success');
+
+                    if (this.isHost && this.localStream) {
+                        const call = this.peer.call(this.conn.peer, this.localStream);
+                        call.on('stream', (stream) => this.handleRemoteStream(stream));
+                    }
+                });
+
+                this.conn.on('data', (data) => {
+                    this.handleIncomingData(data);
+                });
+
+                this.conn.on('close', () => {
+                    this.updatePeerConnectionUI(false);
+                    this.showToast('Peer disconnected', 'error');
+                });
+            }
+
+            handleRemoteStream(stream) {
+                this.remoteStream = stream;
+                const videoEl = document.getElementById('remoteVideo');
+                const placeholder = document.getElementById('videoPlaceholder');
+                
+                videoEl.srcObject = stream;
+                videoEl.classList.remove('hidden');
+                placeholder.classList.add('hidden');
+                this.showToast('Receiving live media stream', 'success');
+            }
+
+            copyShareableLink() {
+                const input = document.getElementById('shareableLinkInput');
+                input.select();
+                document.execCommand('copy');
+                this.showToast('Link copied to clipboard!', 'success');
+            }
+
+            sendChatMessage() {
+                const input = document.getElementById('chatInput');
+                const text = input.value.trim();
+                if (!text) return;
+
+                if (!this.conn || this.conn.open !== true) {
+                    this.showToast('No active peer connection to send message', 'error');
+                    return;
+                }
+
+                const msgObj = { type: 'chat', text: text, sender: this.isHost ? 'Host' : 'Client', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
+                this.conn.send(msgObj);
+                this.appendChatMessage(msgObj, true);
+                input.value = "";
+            }
+
+            handleChatKeyDown(event) {
+                if (event.key === 'Enter') {
+                    this.sendChatMessage();
+                }
+            }
+
+            appendChatMessage(msg, isSelf = false) {
+                const feed = document.getElementById('chatMessageFeed');
+                const div = document.createElement('div');
+                div.className = 'flex flex-col ' + (isSelf ? 'items-end' : 'items-start');
+                
+                div.innerHTML = `
+                    <div class="flex items-center space-x-1.5 mb-1">
+                        <span class="text-[10px] font-semibold text-slate-400">${msg.sender}</span>
+                        <span class="text-[9px] text-slate-600">${msg.time}</span>
+                    </div>
+                    <div class="max-w-[80%] rounded-2xl px-4 py-2.5 text-xs ${isSelf ? 'bg-brand-600 text-white rounded-tr-none' : 'bg-slate-800 text-slate-200 rounded-tl-none'}">
+                        ${this.escapeHtml(msg.text)}
+                    </div>
+                `;
+                feed.appendChild(div);
+                feed.scrollTop = feed.scrollHeight;
+            }
+
+            handleIncomingData(data) {
+                if (data.type === 'chat') {
+                    this.appendChatMessage(data, false);
+                } else if (data.type === 'file-meta') {
+                    this.incomingFileMeta = data;
+                    this.incomingFileBuffers = [];
+                    this.incomingFileSizeReceived = 0;
+                    this.showToast('Incoming file: ' + data.name + ' (' + this.formatBytes(data.size) + ')', 'info');
+                } else if (data.type === 'file-chunk') {
+                    this.incomingFileBuffers.push(data.chunk);
+                    this.incomingFileSizeReceived += data.chunk.byteLength;
+
+                    if (this.incomingFileSizeReceived >= this.incomingFileMeta.size) {
+                        const blob = new Blob(this.incomingFileBuffers, { type: this.incomingFileMeta.fileType });
+                        this.renderReceivedFile(blob, this.incomingFileMeta.name, this.incomingFileMeta.size);
+                        this.incomingFileMeta = null;
+                        this.incomingFileBuffers = [];
+                    }
+                }
+            }
+
+            handleFileSelect(event) {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                if (!this.conn || this.conn.open !== true) {
+                    this.showToast('Connect to a peer device first to send files', 'error');
+                    event.target.value = "";
+                    return;
+                }
+
+                this.showToast('Preparing file: ' + file.name + '...', 'info');
+
+                this.conn.send({
+                    type: 'file-meta',
+                    name: file.name,
+                    size: file.size,
+                    fileType: file.type
+                });
+
+                const chunkSize = 64 * 1024;
+                const reader = new FileReader();
+                let offset = 0;
+
+                reader.onload = (e) => {
+                    this.conn.send({
+                        type: 'file-chunk',
+                        chunk: e.target.result
+                    });
+                    offset += chunkSize;
+                    if (offset < file.size) {
+                        readNextChunk();
+                    } else {
+                        this.showToast('File "' + file.name + '" sent successfully!', 'success');
+                        this.renderSentFile(file.name, file.size);
+                        event.target.value = "";
+                    }
+                };
+
+                const readNextChunk = () => {
+                    const slice = file.slice(offset, offset + chunkSize);
+                    reader.readAsArrayBuffer(slice);
+                };
+
+                readNextChunk();
+            }
+
+            renderSentFile(name, size) {
+                const container = document.getElementById('fileListContainer');
+                const noFiles = document.getElementById('noFilesMsg');
+                if (noFiles) noFiles.remove();
+                
+                const div = document.createElement('div');
+                div.className = "bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between";
+                div.innerHTML = `
+                    <div class="flex items-center space-x-3 overflow-hidden">
+                        <div class="bg-brand-500/10 text-brand-400 p-2.5 rounded-xl"><i class="fa-solid fa-file-arrow-up"></i></div>
+                        <div class="truncate">
+                            <p class="text-xs font-semibold text-slate-200 truncate">${this.escapeHtml(name)}</p>
+                            <p class="text-[10px] text-slate-500">Sent • ${this.formatBytes(size)}</p>
+                        </div>
+                    </div>
+                    <span class="text-[10px] bg-emerald-500/10 text-emerald-400 px-2 py-1 rounded-lg font-medium">Sent</span>
+                `;
+                container.prepend(div);
+                this.updateFileCount();
+            }
+
+            renderReceivedFile(blob, name, size) {
+                const container = document.getElementById('fileListContainer');
+                const noFiles = document.getElementById('noFilesMsg');
+                if (noFiles) noFiles.remove();
+
+                const url = URL.createObjectURL(blob);
+                const div = document.createElement('div');
+                div.className = "bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between";
+                div.innerHTML = `
+                    <div class="flex items-center space-x-3 overflow-hidden">
+                        <div class="bg-sky-500/10 text-sky-400 p-2.5 rounded-xl"><i class="fa-solid fa-file-arrow-down"></i></div>
+                        <div class="truncate">
+                            <p class="text-xs font-semibold text-slate-200 truncate">${this.escapeHtml(name)}</p>
+                            <p class="text-[10px] text-slate-500">Received • ${this.formatBytes(size)}</p>
+                        </div>
+                    </div>
+                    <a href="${url}" download="${name}" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1.5 rounded-xl transition-colors font-medium flex items-center space-x-1.5 shadow-md shadow-sky-600/20">
+                        <i class="fa-solid fa-download"></i>
+                        <span>Save</span>
+                    </a>
+                `;
+                container.prepend(div);
+                this.updateFileCount();
+                this.showToast('File "' + name + '" ready for download!', 'success');
+            }
+
+            updateFileCount() {
+                const container = document.getElementById('fileListContainer');
+                const count = container.querySelectorAll('.bg-slate-950').length;
+                document.getElementById('fileCountBadge').textContent = count + ' file' + (count === 1 ? '' : 's');
+            }
+
+            async toggleCameraShare() {
+                try {
+                    if (this.localStream) {
+                        this.localStream.getTracks().forEach(track => track.stop());
+                        this.localStream = null;
+                        document.getElementById('camBtnText').textContent = "Share Camera";
+                        document.getElementById('camShareBtn').classList.remove('bg-brand-600', 'text-white');
+                        this.showToast('Camera stream stopped', 'info');
+                        return;
+                    }
+
+                    this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                    document.getElementById('camBtnText').textContent = "Stop Camera";
+                    document.getElementById('camShareBtn').classList.add('bg-brand-600', 'text-white');
+                    this.showToast('Camera active and streaming', 'success');
+
+                    if (this.conn && this.conn.open) {
+                        const call = this.peer.call(this.conn.peer, this.localStream);
+                        call.on('stream', stream => this.handleRemoteStream(stream));
+                    }
+                } catch (e) {
+                    console.error(e);
+                    this.showToast('Unable to access camera or permission denied', 'error');
+                }
+            }
+
+            async toggleScreenShare() {
+                try {
+                    if (this.localStream) {
+                        this.localStream.getTracks().forEach(track => track.stop());
+                        this.localStream = null;
+                        document.getElementById('screenBtnText').textContent = "Share Screen";
+                        document.getElementById('screenShareBtn').classList.remove('bg-sky-600', 'text-white');
+                        this.showToast('Screen stream stopped', 'info');
+                        return;
+                    }
+
+                    this.localStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                    document.getElementById('screenBtnText').textContent = "Stop Screen";
+                    document.getElementById('screenShareBtn').classList.add('bg-sky-600', 'text-white');
+                    this.showToast('Screen broadcasting active', 'success');
+
+                    if (this.conn && this.conn.open) {
+                        const call = this.peer.call(this.conn.peer, this.localStream);
+                        call.on('stream', stream => this.handleRemoteStream(stream));
+                    }
+
+                    this.localStream.getVideoTracks()[0].onended = () => {
+                        this.localStream = null;
+                        document.getElementById('screenBtnText').textContent = "Share Screen";
+                        document.getElementById('screenShareBtn').classList.remove('bg-sky-600', 'text-white');
+                    };
+                } catch (e) {
+                    console.error(e);
+                    this.showToast('Screen share cancelled or unsupported', 'error');
+                }
+            }
+
+            disconnectSession() {
+                if (this.conn) this.conn.close();
+                if (this.peer) this.peer.destroy();
+                if (this.localStream) {
+                    this.localStream.getTracks().forEach(t => t.stop());
+                }
+                window.location.hash = "";
+                window.location.reload();
+            }
+
+            formatBytes(bytes, decimals = 2) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const dm = decimals < 0 ? 0 : decimals;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+            }
+
+            escapeHtml(str) {
+                return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+            }
+        }
+
+        const app = new P2PApp();
+    </script>
+</body>
+</html>
