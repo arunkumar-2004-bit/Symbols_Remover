@@ -483,8 +483,19 @@
             setupPeerInstance(peerId, isClient = false) {
                 this.updateStatusBadge('waiting', 'Connecting to network...');
                 
+                // Configured with multiple STUN servers for robust cellular & Wi-Fi NAT traversal
                 this.peer = new Peer(peerId, {
-                    debug: 1
+                    debug: 1,
+                    config: {
+                        iceServers: [
+                            { urls: 'stun:stun.l.google.com:19302' },
+                            { urls: 'stun:stun1.l.google.com:19302' },
+                            { urls: 'stun:stun2.l.google.com:19302' },
+                            { urls: 'stun:stun3.l.google.com:19302' },
+                            { urls: 'stun:stun4.l.google.com:19302' }
+                        ],
+                        iceCandidatePoolSize: 10
+                    }
                 });
 
                 this.peer.on('open', (id) => {
@@ -514,15 +525,19 @@
 
             connectToHostRoom(hostId) {
                 this.updateStatusBadge('waiting', 'Connecting to ' + hostId + '...');
-                // Request optimized WebRTC data channel with high throughput parameters
+                // Request optimized WebRTC data channel with high throughput parameters and robust ICE config
                 const conn = this.peer.connect(hostId, {
                     reliable: true,
                     serialization: 'binary',
                     config: {
                         iceServers: [
                             { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' }
-                        ]
+                            { urls: 'stun:stun1.l.google.com:19302' },
+                            { urls: 'stun:stun2.l.google.com:19302' },
+                            { urls: 'stun:stun3.l.google.com:19302' },
+                            { urls: 'stun:stun4.l.google.com:19302' }
+                        ],
+                        iceCandidatePoolSize: 10
                     }
                 });
                 this.handleIncomingConnection(conn);
@@ -743,7 +758,6 @@
                 const idleBox = document.getElementById('transferIdleBox');
                 if (idleBox) idleBox.classList.add('hidden');
 
-                // Receiver side: progress bar only, no status pill / notification text
                 if (type === 'send') {
                     const status = document.getElementById('transferOverallStatus');
                     if (status) {
@@ -810,7 +824,6 @@
                     type === 'send' ? this.currentSendingTotal : (this.incomingFileMeta?.size || 0)
                 );
 
-                // Receiver side: only the progress bar updates, no completion notification text
                 if (type === 'send') {
                     const status = document.getElementById('transferOverallStatus');
                     if (status) {
