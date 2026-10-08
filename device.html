@@ -168,17 +168,6 @@
                 <div id="hostControlsCard" class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
                     <div class="flex items-center justify-between"><h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Broadcast Controls</h3><span class="text-[10px] text-emerald-400 font-medium">VPN / Direct Turbo Enabled</span></div>
                     
-                    <div class="grid grid-cols-2 gap-3">
-                        <button onclick="app.toggleCameraShare()" id="camShareBtn" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 py-3 px-4 rounded-xl text-xs font-medium flex items-center justify-center space-x-2 transition-colors">
-                            <i class="fa-solid fa-video text-brand-400"></i>
-                            <span id="camBtnText">Share Camera</span>
-                        </button>
-                        <button onclick="app.toggleScreenShare()" id="screenShareBtn" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 py-3 px-4 rounded-xl text-xs font-medium flex items-center justify-center space-x-2 transition-colors">
-                            <i class="fa-solid fa-desktop text-sky-400"></i>
-                            <span id="screenBtnText">Share Screen</span>
-                        </button>
-                    </div>
-
                     <!-- VPN & Turbo Diagnostics Panel -->
                     <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-2.5">
                         <div class="flex items-center justify-between">
@@ -275,17 +264,6 @@
                     </div>
                 </div>
 
-                <!-- Live Stream Display Card -->
-                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg">
-                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400 mb-3">Live Video Stream</h3>
-                    <div class="relative bg-slate-950 rounded-2xl overflow-hidden aspect-video border border-slate-800 flex items-center justify-center">
-                        <video id="remoteVideo" autoplay playsinline class="w-full h-full object-cover hidden"></video>
-                        <div id="videoPlaceholder" class="text-center p-4">
-                            <i class="fa-solid fa-video-slash text-slate-700 text-2xl mb-2"></i>
-                            <p class="text-xs text-slate-500">No active stream from peer</p>
-                        </div>
-                    </div>
-                </div>
             </div>
 
             <!-- Right Column: Chat & File Transfer Log -->
@@ -371,8 +349,6 @@
             constructor() {
                 this.peer = null;
                 this.conn = null;
-                this.localStream = null;
-                this.remoteStream = null;
                 this.isHost = false;
                 this.roomId = null;
                 this.incomingFileMeta = null;
@@ -526,13 +502,6 @@
                     this.handleIncomingConnection(conn);
                 });
 
-                this.peer.on('call', (call) => {
-                    call.answer(this.localStream);
-                    call.on('stream', (remoteStream) => {
-                        this.handleRemoteStream(remoteStream);
-                    });
-                });
-
                 this.peer.on('error', (err) => {
                     console.error(err);
                     this.updateStatusBadge('error', 'Connection Error');
@@ -548,15 +517,6 @@
                     serialization: 'raw'
                 });
                 this.handleIncomingConnection(conn);
-
-                // Only start a media call if a stream is actually being shared.
-                // (An empty MediaStream call adds a second negotiation and delays connecting.)
-                if (this.localStream) {
-                    const call = this.peer.call(hostId, this.localStream);
-                    call.on('stream', (remoteStream) => {
-                        this.handleRemoteStream(remoteStream);
-                    });
-                }
             }
 
             handleIncomingConnection(conn) {
@@ -570,11 +530,6 @@
                         dc.binaryType = 'arraybuffer';
                         dc.bufferedAmountLowThreshold = BUFFER_LOW;
                     }
-
-                    if (this.isHost && this.localStream) {
-                        const call = this.peer.call(this.conn.peer, this.localStream);
-                        call.on('stream', (stream) => this.handleRemoteStream(stream));
-                    }
                 });
 
                 this.conn.on('data', (data) => {
@@ -584,16 +539,6 @@
                 this.conn.on('close', () => {
                     this.updatePeerConnectionUI(false);
                 });
-            }
-
-            handleRemoteStream(stream) {
-                this.remoteStream = stream;
-                const videoEl = document.getElementById('remoteVideo');
-                const placeholder = document.getElementById('videoPlaceholder');
-                
-                videoEl.srcObject = stream;
-                videoEl.classList.remove('hidden');
-                placeholder.classList.add('hidden');
             }
 
             copyShareableLink() {
@@ -920,64 +865,9 @@
                 document.getElementById('fileCountBadge').textContent = count + ' file' + (count === 1 ? '' : 's');
             }
 
-            async toggleCameraShare() {
-                try {
-                    if (this.localStream) {
-                        this.localStream.getTracks().forEach(track => track.stop());
-                        this.localStream = null;
-                        document.getElementById('camBtnText').textContent = "Share Camera";
-                        document.getElementById('camShareBtn').classList.remove('bg-brand-600', 'text-white');
-                        return;
-                    }
-
-                    this.localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-                    document.getElementById('camBtnText').textContent = "Stop Camera";
-                    document.getElementById('camShareBtn').classList.add('bg-brand-600', 'text-white');
-
-                    if (this.conn && this.conn.open) {
-                        const call = this.peer.call(this.conn.peer, this.localStream);
-                        call.on('stream', stream => this.handleRemoteStream(stream));
-                    }
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-
-            async toggleScreenShare() {
-                try {
-                    if (this.localStream) {
-                        this.localStream.getTracks().forEach(track => track.stop());
-                        this.localStream = null;
-                        document.getElementById('screenBtnText').textContent = "Share Screen";
-                        document.getElementById('screenShareBtn').classList.remove('bg-sky-600', 'text-white');
-                        return;
-                    }
-
-                    this.localStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-                    document.getElementById('screenBtnText').textContent = "Stop Screen";
-                    document.getElementById('screenShareBtn').classList.add('bg-sky-600', 'text-white');
-
-                    if (this.conn && this.conn.open) {
-                        const call = this.peer.call(this.conn.peer, this.localStream);
-                        call.on('stream', stream => this.handleRemoteStream(stream));
-                    }
-
-                    this.localStream.getVideoTracks()[0].onended = () => {
-                        this.localStream = null;
-                        document.getElementById('screenBtnText').textContent = "Share Screen";
-                        document.getElementById('screenShareBtn').classList.remove('bg-sky-600', 'text-white');
-                    };
-                } catch (e) {
-                    console.error(e);
-                }
-            }
-
             disconnectSession() {
                 if (this.conn) this.conn.close();
                 if (this.peer) this.peer.destroy();
-                if (this.localStream) {
-                    this.localStream.getTracks().forEach(t => t.stop());
-                }
                 window.location.hash = "";
                 window.location.reload();
             }
