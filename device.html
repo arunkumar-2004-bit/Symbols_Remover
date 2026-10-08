@@ -25,6 +25,7 @@
         }
     </script>
     <!-- PeerJS CDN for WebRTC P2P Data & Media Channels -->
+    <!-- Note: a browser app does not create a system VPN. For Jio↔BSNL/private-network routing, run this app over WireGuard/Tailscale. -->
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <!-- QRCode Generator library for visual link sharing -->
     <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.min.js"></script>
@@ -45,7 +46,7 @@
                 </div>
                 <div>
                     <h1 class="font-bold text-lg tracking-tight bg-gradient-to-r from-white via-slate-200 to-slate-400 bg-clip-text text-transparent">DeviceLink P2P</h1>
-                    <p class="text-xs text-slate-400">Two-Way Browser P2P File & Data Streamer</p>
+                    <p class="text-xs text-slate-400">Two-Way Browser-to-Browser Data Streamer</p>
                 </div>
             </div>
             <div id="connectionStatusBadge" class="hidden items-center space-x-2 px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-xs font-medium">
@@ -66,7 +67,7 @@
             </div>
             <h2 class="text-3xl font-extrabold tracking-tight mb-3">Connect Any Device Instantly</h2>
             <p class="text-slate-400 mb-10 max-w-lg mx-auto text-sm">
-                Share files in both directions. Folder access requires explicit permission from the receiving device. For Jio ↔ BSNL, use a WireGuard/Tailscale VPN overlay when a private network path is required.
+                Share files, stream live media, or send clipboard text securely between your phone and PC without intermediaries or cloud storage limits.
             </p>
 
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
@@ -166,36 +167,9 @@
                     </div>
                 </div>
 
-                <!-- Two-Way File Access / Permission Controls -->
-                <div class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
-                    <div class="flex items-center justify-between">
-                        <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Two-Way File Access</h3>
-                        <span id="vpnStatus" class="px-2 py-1 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-semibold">
-                            VPN mode: check network
-                        </span>
-                    </div>
-
-                    <p class="text-xs text-slate-400">
-                        After connection, each device must explicitly approve folder access. No folder is shared automatically.
-                    </p>
-
-                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <button onclick="app.requestFolderAccess()" class="bg-brand-600 hover:bg-brand-500 text-white py-3 px-4 rounded-xl text-xs font-semibold">
-                            <i class="fa-solid fa-folder-open mr-2"></i>Share a Folder
-                        </button>
-                        <button onclick="app.requestPeerFolder()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 py-3 px-4 rounded-xl text-xs font-semibold">
-                            <i class="fa-solid fa-folder-tree mr-2"></i>Request Peer Folder
-                        </button>
-                    </div>
-
-                    <div id="permissionStatus" class="text-[10px] text-slate-500">
-                        Folder permission: Not granted
-                    </div>
-                </div>
-
                 <!-- Host Stream Controls -->
                 <div id="hostControlsCard" class="bg-slate-900 border border-slate-800 rounded-3xl p-6 shadow-lg space-y-4">
-                    <h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Broadcast Controls</h3>
+                    <div class="flex items-center justify-between"><h3 class="text-sm font-semibold uppercase tracking-wider text-slate-400">Broadcast & File Controls</h3><span class="text-[10px] text-emerald-400 font-medium">Two-way enabled</span></div>
                     
                     <div class="grid grid-cols-2 gap-3">
                         <button onclick="app.toggleCameraShare()" id="camShareBtn" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 py-3 px-4 rounded-xl text-xs font-medium flex items-center justify-center space-x-2 transition-colors">
@@ -206,6 +180,17 @@
                             <i class="fa-solid fa-desktop text-sky-400"></i>
                             <span id="screenBtnText">Share Screen</span>
                         </button>
+                    </div>
+
+
+                    <div class="flex items-center justify-between bg-slate-950 border border-slate-800 rounded-xl px-3 py-2">
+                        <span class="text-[10px] text-slate-500">
+                            <i class="fa-solid fa-shield-halved mr-1 text-emerald-400"></i>
+                            File transport
+                        </span>
+                        <span class="text-[10px] text-emerald-400 font-medium">
+                            Reliable WebRTC / VPN-compatible
+                        </span>
                     </div>
 
                     <!-- File Drop / Selector -->
@@ -286,7 +271,7 @@
     </main>
 
     <footer class="border-t border-slate-900 bg-slate-950 py-4 text-center text-xs text-slate-500">
-        <p>Built with WebRTC & PeerJS. Two-way file transfer with explicit folder permission. For true VPN networking across Jio/BSNL, use WireGuard or Tailscale on both devices.</p>
+        <p>Built with WebRTC & PeerJS. Direct browser connection—no data stored on servers.</p>
     </footer>
 
     <script>
@@ -301,11 +286,8 @@
                 this.incomingFileMeta = null;
                 this.incomingFileBuffers = [];
                 this.incomingFileSizeReceived = 0;
-                this.sharedDirectory = null;
-                this.sharedDirectoryName = null;
-                this.pendingPermissionRequest = null;
-                this.remoteFolderGranted = false;
-                this.remoteFolderFiles = [];
+                this.incomingFileTransferId = null;
+                this.fileTransferCounter = 0;
 
                 window.addEventListener('load', () => {
                     const hash = window.location.hash.replace('#', '');
@@ -435,7 +417,7 @@
 
                 document.getElementById('clientJoinView').classList.add('hidden');
                 document.getElementById('workspaceView').classList.remove('hidden');
-                document.getElementById('hostControlsCard').classList.add('hidden');
+                document.getElementById('hostControlsCard').classList.remove('hidden');
                 document.getElementById('roleBadge').textContent = "Client Viewer";
                 document.getElementById('roleBadge').className = "px-2.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-sky-500/10 text-sky-400 border border-sky-500/20";
                 
@@ -483,7 +465,10 @@
 
             connectToHostRoom(hostId) {
                 this.updateStatusBadge('waiting', 'Connecting to ' + hostId + '...');
-                const conn = this.peer.connect(hostId, { reliable: true });
+                const conn = this.peer.connect(hostId, {
+                    reliable: true,
+                    serialization: 'binary'
+                });
                 this.handleIncomingConnection(conn);
 
                 if (this.localStream) {
@@ -504,7 +489,6 @@
 
                 this.conn.on('open', () => {
                     this.updatePeerConnectionUI(true);
-                    this.updateVpnStatus();
                     this.showToast('Peer connected securely!', 'success');
 
                     if (this.isHost && this.localStream) {
@@ -581,261 +565,133 @@
                 feed.scrollTop = feed.scrollHeight;
             }
 
-            handleIncomingData(data) {
-                if (!data || !data.type) return;
+            async handleIncomingData(data) {
+                if (!data) return;
 
                 if (data.type === 'chat') {
                     this.appendChatMessage(data, false);
+                    return;
+                }
 
-                } else if (data.type === 'permission-request') {
-                    this.showPermissionDialog(data);
-
-                } else if (data.type === 'permission-response') {
-                    if (data.granted) {
-                        this.remoteFolderGranted = true;
-                        this.showToast('Peer approved folder access.', 'success');
-                        this.updatePermissionStatus('Peer has approved folder access.');
-                    } else {
-                        this.remoteFolderGranted = false;
-                        this.showToast('Peer denied folder access.', 'error');
-                        this.updatePermissionStatus('Peer denied folder access.');
-                    }
-
-                } else if (data.type === 'folder-request') {
-                    // The peer is asking to access this device's shared folder.
-                    if (!this.sharedDirectory) {
-                        this.send({type:'folder-response', granted:false, reason:'No folder has been shared.'});
-                        return;
-                    }
-                    this.sendFolderListing();
-
-                } else if (data.type === 'folder-response') {
-                    if (!data.granted) {
-                        this.showToast(data.reason || 'Folder access was denied.', 'error');
-                        return;
-                    }
-                    this.remoteFolderFiles = data.files || [];
-                    this.renderRemoteFolder(data.folderName || 'Shared Folder', this.remoteFolderFiles);
-
-                } else if (data.type === 'file-request') {
-                    this.handleRemoteFileRequest(data);
-
-                } else if (data.type === 'file-meta') {
+                // A new file transfer starts here.
+                if (data.type === 'file-meta') {
                     this.incomingFileMeta = data;
+                    this.incomingFileTransferId = data.transferId;
                     this.incomingFileBuffers = [];
                     this.incomingFileSizeReceived = 0;
-                    this.showToast('Incoming file: ' + data.name + ' (' + this.formatBytes(data.size) + ')', 'info');
 
-                } else if (data.type === 'file-chunk') {
-                    this.incomingFileBuffers.push(data.chunk);
-                    this.incomingFileSizeReceived += data.chunk.byteLength;
+                    this.showToast(
+                        'Receiving "' + data.name + '" (' + this.formatBytes(data.size) + ')',
+                        'info'
+                    );
+                    return;
+                }
 
-                    if (this.incomingFileMeta &&
-                        this.incomingFileSizeReceived >= this.incomingFileMeta.size) {
-                        const blob = new Blob(this.incomingFileBuffers, { type: this.incomingFileMeta.fileType });
-                        this.renderReceivedFile(blob, this.incomingFileMeta.name, this.incomingFileMeta.size);
-                        this.incomingFileMeta = null;
-                        this.incomingFileBuffers = [];
-                        this.incomingFileSizeReceived = 0;
+                if (data.type === 'file-chunk') {
+                    if (!this.incomingFileMeta ||
+                        data.transferId !== this.incomingFileTransferId) {
+                        return;
                     }
-                }
-            }
 
-            send(payload) {
-                if (!this.conn || this.conn.open !== true) {
-                    this.showToast('No active peer connection.', 'error');
-                    return false;
-                }
-                this.conn.send(payload);
-                return true;
-            }
+                    try {
+                        const buffer = await this.chunkToArrayBuffer(data.chunk);
+                        this.incomingFileBuffers.push(buffer);
+                        this.incomingFileSizeReceived += buffer.byteLength;
 
-            updatePermissionStatus(text) {
-                const el = document.getElementById('permissionStatus');
-                if (el) el.textContent = 'Folder permission: ' + text;
-            }
+                        this.updateIncomingFileProgress();
 
-            async requestFolderAccess() {
-                if (!window.showDirectoryPicker) {
-                    this.showToast('This browser does not support folder access. Use current Chrome/Edge.', 'error');
-                    return;
-                }
-                if (!this.conn || !this.conn.open) {
-                    this.showToast('Connect to the other device first.', 'error');
-                    return;
-                }
-
-                try {
-                    const dir = await window.showDirectoryPicker({ mode: 'read' });
-                    this.sharedDirectory = dir;
-                    this.sharedDirectoryName = dir.name;
-                    this.updatePermissionStatus('Granted locally: ' + dir.name);
-                    this.showToast('Folder selected and ready to share.', 'success');
-
-                    this.send({
-                        type: 'permission-request',
-                        action: 'share-folder',
-                        folderName: dir.name,
-                        message: 'This device wants to share this folder with you.'
-                    });
-                } catch (e) {
-                    this.showToast('Folder selection cancelled.', 'info');
-                }
-            }
-
-            requestPeerFolder() {
-                if (!this.conn || !this.conn.open) {
-                    this.showToast('Connect to the other device first.', 'error');
-                    return;
-                }
-                this.send({
-                    type: 'folder-request',
-                    action: 'list-shared-folder'
-                });
-                this.showToast('Requested the peer shared folder.', 'info');
-            }
-
-            showPermissionDialog(data) {
-                const existing = document.getElementById('permissionDialog');
-                if (existing) existing.remove();
-
-                const dialog = document.createElement('div');
-                dialog.id = 'permissionDialog';
-                dialog.className = 'fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4';
-                dialog.innerHTML = `
-                    <div class="max-w-md w-full bg-slate-900 border border-slate-700 rounded-3xl p-6 shadow-2xl">
-                        <h3 class="text-lg font-bold mb-2">Folder Access Request</h3>
-                        <p class="text-sm text-slate-300 mb-2">
-                            The connected device wants permission to access:
-                        </p>
-                        <p class="font-mono text-brand-400 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-sm mb-4">
-                            ${this.escapeHtml(data.folderName || 'Shared Folder')}
-                        </p>
-                        <p class="text-xs text-slate-500 mb-5">
-                            Approving this request only allows access to files that the other device explicitly shares through this application.
-                        </p>
-                        <div class="grid grid-cols-2 gap-3">
-                            <button id="denyPermissionBtn" class="bg-slate-800 hover:bg-slate-700 py-3 rounded-xl text-sm font-semibold">Deny</button>
-                            <button id="allowPermissionBtn" class="bg-brand-600 hover:bg-brand-500 py-3 rounded-xl text-sm font-semibold">Allow</button>
-                        </div>
-                    </div>`;
-                document.body.appendChild(dialog);
-
-                document.getElementById('denyPermissionBtn').onclick = () => {
-                    this.send({type:'permission-response', granted:false});
-                    dialog.remove();
-                    this.showToast('Folder access denied.', 'info');
-                };
-
-                document.getElementById('allowPermissionBtn').onclick = () => {
-                    this.remoteFolderGranted = true;
-                    this.send({type:'permission-response', granted:true});
-                    dialog.remove();
-                    this.showToast('Folder access approved.', 'success');
-                };
-            }
-
-            async sendFolderListing() {
-                if (!this.sharedDirectory) {
-                    this.send({type:'folder-response', granted:false, reason:'No folder shared.'});
-                    return;
-                }
-
-                const files = [];
-                try {
-                    for await (const [name, handle] of this.sharedDirectory.entries()) {
-                        if (handle.kind === 'file') {
-                            files.push({name});
+                        // The sender explicitly finishes with file-end.
+                        // This check is kept as a safety net for exact-size transfers.
+                        if (this.incomingFileSizeReceived >= this.incomingFileMeta.size &&
+                            data.isLast === true) {
+                            this.finishIncomingFile();
                         }
+                    } catch (error) {
+                        console.error('File chunk error:', error);
+                        this.showToast('Unable to read an incoming file chunk', 'error');
                     }
-                    this.send({
-                        type:'folder-response',
-                        granted:true,
-                        folderName:this.sharedDirectoryName,
-                        files
-                    });
-                } catch (e) {
-                    this.send({type:'folder-response', granted:false, reason:'Unable to read shared folder.'});
-                }
-            }
-
-            renderRemoteFolder(folderName, files) {
-                const container = document.getElementById('fileListContainer');
-                const noFiles = document.getElementById('noFilesMsg');
-                if (noFiles) noFiles.remove();
-
-                const wrapper = document.createElement('div');
-                wrapper.className = "bg-slate-950 border border-slate-800 rounded-2xl p-3 mb-2";
-                wrapper.innerHTML = `
-                    <div class="flex items-center justify-between mb-2">
-                        <p class="text-xs font-semibold text-brand-400">
-                            <i class="fa-solid fa-folder-open mr-1"></i>${this.escapeHtml(folderName)}
-                        </p>
-                        <span class="text-[10px] text-slate-500">${files.length} file(s)</span>
-                    </div>
-                    <div class="space-y-1">
-                        ${files.map(f => `
-                            <div class="flex items-center justify-between bg-slate-900 rounded-xl px-3 py-2">
-                                <span class="text-xs truncate">${this.escapeHtml(f.name)}</span>
-                                <button onclick="app.requestRemoteFile('${encodeURIComponent(f.name)}')"
-                                    class="text-[10px] bg-sky-600 hover:bg-sky-500 px-2 py-1 rounded-lg">
-                                    Request
-                                </button>
-                            </div>`).join('')}
-                    </div>`;
-                container.prepend(wrapper);
-            }
-
-            requestRemoteFile(encodedName) {
-                const name = decodeURIComponent(encodedName);
-                if (!this.remoteFolderGranted) {
-                    this.showToast('Peer has not approved folder access.', 'error');
-                    return;
-                }
-                this.send({type:'file-request', name});
-                this.showToast('Requested: ' + name, 'info');
-            }
-
-            async handleRemoteFileRequest(data) {
-                if (!this.sharedDirectory || !this.remoteFolderGranted) {
-                    this.send({type:'file-denied', name:data.name, reason:'Folder access not approved.'});
                     return;
                 }
 
-                try {
-                    const handle = await this.sharedDirectory.getFileHandle(data.name);
-                    const file = await handle.getFile();
-                    this.sendFileObject(file);
-                } catch (e) {
-                    this.send({type:'file-denied', name:data.name, reason:'File not found or unavailable.'});
+                if (data.type === 'file-end') {
+                    if (!this.incomingFileMeta ||
+                        data.transferId !== this.incomingFileTransferId) {
+                        return;
+                    }
+
+                    this.finishIncomingFile();
                 }
             }
 
-            async sendFileObject(file) {
-                this.send({
-                    type: 'file-meta',
-                    name: file.name,
-                    size: file.size,
-                    fileType: file.type || 'application/octet-stream'
+            async chunkToArrayBuffer(chunk) {
+                if (chunk instanceof ArrayBuffer) {
+                    return chunk;
+                }
+
+                if (ArrayBuffer.isView(chunk)) {
+                    return chunk.buffer.slice(
+                        chunk.byteOffset,
+                        chunk.byteOffset + chunk.byteLength
+                    );
+                }
+
+                if (chunk instanceof Blob) {
+                    return await chunk.arrayBuffer();
+                }
+
+                // Fallback for browsers/serializers that expose binary data as
+                // an array-like object.
+                if (chunk && typeof chunk === 'object') {
+                    const values = Object.keys(chunk)
+                        .sort((a, b) => Number(a) - Number(b))
+                        .map(key => Number(chunk[key]));
+                    return new Uint8Array(values).buffer;
+                }
+
+                throw new Error('Unsupported binary chunk type');
+            }
+
+            updateIncomingFileProgress() {
+                if (!this.incomingFileMeta) return;
+
+                const received = this.incomingFileSizeReceived;
+                const total = this.incomingFileMeta.size || 1;
+                const percent = Math.min(100, Math.round((received / total) * 100));
+
+                this.showToast(
+                    'Receiving "' + this.incomingFileMeta.name + '": ' + percent + '%',
+                    'info'
+                );
+            }
+
+            finishIncomingFile() {
+                if (!this.incomingFileMeta) return;
+
+                const meta = this.incomingFileMeta;
+                const blob = new Blob(this.incomingFileBuffers, {
+                    type: meta.fileType || 'application/octet-stream'
                 });
 
-                const chunkSize = 64 * 1024;
-                let offset = 0;
+                this.renderReceivedFile(blob, meta.name, meta.size);
 
-                while (offset < file.size) {
-                    const chunk = await file.slice(offset, offset + chunkSize).arrayBuffer();
+                this.incomingFileMeta = null;
+                this.incomingFileTransferId = null;
+                this.incomingFileBuffers = [];
+                this.incomingFileSizeReceived = 0;
+            }
 
-                    // Avoid overflowing the WebRTC send buffer.
-                    while (this.conn && this.conn.bufferedAmount > 4 * 1024 * 1024) {
-                        await new Promise(resolve => setTimeout(resolve, 20));
-                    }
+            async waitForSendBuffer() {
+                // PeerJS exposes the underlying RTCDataChannel on dataChannel.
+                // Waiting here prevents large files from flooding the WebRTC
+                // send buffer, which was the main cause of files appearing as
+                // "sent" on one side but never completing on the other.
+                const channel = this.conn && this.conn.dataChannel;
 
-                    if (!this.send({type:'file-chunk', chunk})) return;
-                    offset += chunk.byteLength;
+                if (!channel) return;
+
+                while (channel.bufferedAmount > (4 * 1024 * 1024)) {
+                    await new Promise(resolve => setTimeout(resolve, 25));
                 }
-
-                this.renderSentFile(file.name, file.size);
-                this.showToast('File "' + file.name + '" sent successfully!', 'success');
             }
 
             async handleFileSelect(event) {
@@ -843,17 +699,71 @@
                 if (!file) return;
 
                 if (!this.conn || this.conn.open !== true) {
-                    this.showToast('Connect to a peer device first to send files.', 'error');
+                    this.showToast('Connect to a peer device first to send files', 'error');
                     event.target.value = "";
                     return;
                 }
 
+                const transferId =
+                    Date.now().toString(36) + '-' +
+                    (++this.fileTransferCounter).toString(36) + '-' +
+                    Math.random().toString(36).substring(2, 8);
+
                 try {
-                    await this.sendFileObject(file);
-                    event.target.value = "";
-                } catch (e) {
-                    console.error(e);
-                    this.showToast('File transfer failed.', 'error');
+                    this.showToast(
+                        'Sending "' + file.name + '" (' + this.formatBytes(file.size) + ')',
+                        'info'
+                    );
+
+                    this.conn.send({
+                        type: 'file-meta',
+                        transferId: transferId,
+                        name: file.name,
+                        size: file.size,
+                        fileType: file.type || 'application/octet-stream'
+                    });
+
+                    const chunkSize = 64 * 1024;
+                    let offset = 0;
+
+                    while (offset < file.size) {
+                        const slice = file.slice(offset, offset + chunkSize);
+                        const buffer = await slice.arrayBuffer();
+
+                        await this.waitForSendBuffer();
+
+                        this.conn.send({
+                            type: 'file-chunk',
+                            transferId: transferId,
+                            chunk: buffer,
+                            isLast: (offset + buffer.byteLength) >= file.size
+                        });
+
+                        offset += buffer.byteLength;
+                    }
+
+                    await this.waitForSendBuffer();
+
+                    this.conn.send({
+                        type: 'file-end',
+                        transferId: transferId,
+                        name: file.name,
+                        size: file.size
+                    });
+
+                    this.showToast(
+                        'File "' + file.name + '" sent successfully!',
+                        'success'
+                    );
+                    this.renderSentFile(file.name, file.size);
+
+                } catch (error) {
+                    console.error('File send error:', error);
+                    this.showToast(
+                        'File transfer failed: ' + (error.message || 'unknown error'),
+                        'error'
+                    );
+                } finally {
                     event.target.value = "";
                 }
             }
@@ -865,6 +775,7 @@
                 
                 const div = document.createElement('div');
                 div.className = "bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between";
+                div.dataset.fileEntry = "1";
                 div.innerHTML = `
                     <div class="flex items-center space-x-3 overflow-hidden">
                         <div class="bg-brand-500/10 text-brand-400 p-2.5 rounded-xl"><i class="fa-solid fa-file-arrow-up"></i></div>
@@ -887,6 +798,8 @@
                 const url = URL.createObjectURL(blob);
                 const div = document.createElement('div');
                 div.className = "bg-slate-950 border border-slate-800 rounded-2xl p-3 flex items-center justify-between";
+                div.dataset.fileEntry = "1";
+                const safeName = this.escapeHtml(name);
                 div.innerHTML = `
                     <div class="flex items-center space-x-3 overflow-hidden">
                         <div class="bg-sky-500/10 text-sky-400 p-2.5 rounded-xl"><i class="fa-solid fa-file-arrow-down"></i></div>
@@ -895,7 +808,7 @@
                             <p class="text-[10px] text-slate-500">Received • ${this.formatBytes(size)}</p>
                         </div>
                     </div>
-                    <a href="${url}" download="${name}" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1.5 rounded-xl transition-colors font-medium flex items-center space-x-1.5 shadow-md shadow-sky-600/20">
+                    <a href="${url}" download="${safeName}" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1.5 rounded-xl transition-colors font-medium flex items-center space-x-1.5 shadow-md shadow-sky-600/20">
                         <i class="fa-solid fa-download"></i>
                         <span>Save</span>
                     </a>
@@ -907,7 +820,7 @@
 
             updateFileCount() {
                 const container = document.getElementById('fileListContainer');
-                const count = container.querySelectorAll('.bg-slate-950').length;
+                const count = container.querySelectorAll('[data-file-entry="1"]').length;
                 document.getElementById('fileCountBadge').textContent = count + ' file' + (count === 1 ? '' : 's');
             }
 
@@ -967,18 +880,6 @@
                     console.error(e);
                     this.showToast('Screen share cancelled or unsupported', 'error');
                 }
-            }
-
-            updateVpnStatus() {
-                const el = document.getElementById('vpnStatus');
-                if (!el) return;
-
-                // A browser cannot create a system VPN tunnel by itself.
-                // This UI indicates that WebRTC is using its NAT traversal path.
-                // For a true Jio <-> BSNL private network, use WireGuard/Tailscale
-                // on both devices and run this application over that VPN.
-                el.textContent = 'Cross-network: WebRTC/NAT path';
-                el.className = "px-2 py-1 rounded-lg bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-semibold";
             }
 
             disconnectSession() {
