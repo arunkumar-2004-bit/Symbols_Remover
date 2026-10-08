@@ -186,7 +186,7 @@
                                 <i class="fa-solid fa-shield-halved text-brand-500"></i>
                                 <span>Turbo VPN / MTU Optimization</span>
                             </span>
-                            <span id="turboStatus" class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded font-mono">Active (256KB Chunks)</span>
+                            <span id="turboStatus" class="text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded font-mono">Active (64KB Raw Chunks)</span>
                         </div>
                         <div class="grid grid-cols-3 gap-2 text-center">
                             <div class="bg-slate-900 p-2 rounded-xl border border-slate-800">
@@ -346,6 +346,27 @@
     </footer>
 
     <script>
+        // Optional TURN relay (recommended when phone is on Jio mobile data and PC is on another network).
+        // Fill in credentials from a free account (e.g. metered.ca) and uncomment:
+        const TURN_SERVERS = [
+            // { urls: 'turn:YOUR_TURN_HOST:443?transport=tcp', username: 'YOUR_USERNAME', credential: 'YOUR_CREDENTIAL' },
+        ];
+
+        const ICE_SERVERS = [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            ...TURN_SERVERS
+        ];
+
+        // Raw binary chunking: 64KB works safely between all browsers
+        const CHUNK_SIZE = 64 * 1024;
+        // Read from disk in bigger blocks, then slice into chunks (fewer async reads)
+        const READ_BLOCK = 1024 * 1024;
+        // Backpressure: pause sending above HIGH, resume when buffer drains below LOW
+        const BUFFER_HIGH = 4 * 1024 * 1024;
+        const BUFFER_LOW = 1024 * 1024;
+
         class P2PApp {
             constructor() {
                 this.peer = null;
@@ -359,6 +380,7 @@
                 this.incomingFileSizeReceived = 0;
                 this.incomingFileTransferId = null;
                 this.fileTransferCounter = 0;
+                this.lastUiUpdate = 0;
 
                 window.addEventListener('load', () => {
                     const hash = window.location.hash.replace('#', '');
@@ -483,17 +505,11 @@
             setupPeerInstance(peerId, isClient = false) {
                 this.updateStatusBadge('waiting', 'Connecting to network...');
                 
-                // Configured with multiple STUN servers for robust cellular & Wi-Fi NAT traversal
+                // ICE config must be passed to the Peer constructor (PeerJS ignores it in connect())
                 this.peer = new Peer(peerId, {
                     debug: 1,
                     config: {
-                        iceServers: [
-                            { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' },
-                            { urls: 'stun:stun2.l.google.com:19302' },
-                            { urls: 'stun:stun3.l.google.com:19302' },
-                            { urls: 'stun:stun4.l.google.com:19302' }
-                        ],
+                        iceServers: ICE_SERVERS,
                         iceCandidatePoolSize: 10
                     }
                 });
@@ -525,30 +541,18 @@
 
             connectToHostRoom(hostId) {
                 this.updateStatusBadge('waiting', 'Connecting to ' + hostId + '...');
-                // Request optimized WebRTC data channel with high throughput parameters and robust ICE config
+                // 'raw' skips PeerJS's slow BinaryPack encoding + 16KB re-chunking.
+                // Control messages are JSON strings, file chunks are plain ArrayBuffers.
                 const conn = this.peer.connect(hostId, {
                     reliable: true,
-                    serialization: 'binary',
-                    config: {
-                        iceServers: [
-                            { urls: 'stun:stun.l.google.com:19302' },
-                            { urls: 'stun:stun1.l.google.com:19302' },
-                            { urls: 'stun:stun2.l.google.com:19302' },
-                            { urls: 'stun:stun3.l.google.com:19302' },
-                            { urls: 'stun:stun4.l.google.com:19302' }
-                        ],
-                        iceCandidatePoolSize: 10
-                    }
+                    serialization: 'raw'
                 });
                 this.handleIncomingConnection(conn);
 
+                // Only start a media call if a stream is actually being shared.
+                // (An empty MediaStream call adds a second negotiation and delays connecting.)
                 if (this.localStream) {
                     const call = this.peer.call(hostId, this.localStream);
-                    call.on('stream', (remoteStream) => {
-                        this.handleRemoteStream(remoteStream);
-                    });
-                } else {
-                    const call = this.peer.call(hostId, new MediaStream());
                     call.on('stream', (remoteStream) => {
                         this.handleRemoteStream(remoteStream);
                     });
@@ -561,9 +565,10 @@
                 this.conn.on('open', () => {
                     this.updatePeerConnectionUI(true);
 
-                    // Optimize underlying DataChannel buffer for high-speed VPN/LAN transfer
-                    if (this.conn.dataChannel) {
-                        this.conn.dataChannel.bufferedAmountLowThreshold = 64 * 1024;
+                    const dc = this.conn.dataChannel;
+                    if (dc) {
+                        dc.binaryType = 'arraybuffer';
+                        dc.bufferedAmountLowThreshold = BUFFER_LOW;
                     }
 
                     if (this.isHost && this.localStream) {
@@ -597,6 +602,10 @@
                 document.execCommand('copy');
             }
 
+            sendControl(obj) {
+                this.conn.send(JSON.stringify(obj));
+            }
+
             sendChatMessage() {
                 const input = document.getElementById('chatInput');
                 const text = input.value.trim();
@@ -607,7 +616,7 @@
                 }
 
                 const msgObj = { type: 'chat', text: text, sender: this.isHost ? 'Host' : 'Client', time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) };
-                this.conn.send(msgObj);
+                this.sendControl(msgObj);
                 this.appendChatMessage(msgObj, true);
                 input.value = "";
             }
@@ -625,8 +634,8 @@
                 
                 div.innerHTML = `
                     <div class="flex items-center space-x-1.5 mb-1">
-                        <span class="text-[10px] font-semibold text-slate-400">${msg.sender}</span>
-                        <span class="text-[9px] text-slate-600">${msg.time}</span>
+                        <span class="text-[10px] font-semibold text-slate-400">${this.escapeHtml(String(msg.sender))}</span>
+                        <span class="text-[9px] text-slate-600">${this.escapeHtml(String(msg.time))}</span>
                     </div>
                     <div class="max-w-[80%] rounded-2xl px-4 py-2.5 text-xs ${isSelf ? 'bg-brand-600 text-white rounded-tr-none' : 'bg-slate-800 text-slate-200 rounded-tl-none'}">
                         ${this.escapeHtml(msg.text)}
@@ -636,81 +645,50 @@
                 feed.scrollTop = feed.scrollHeight;
             }
 
-            async handleIncomingData(data) {
-                if (!data) return;
+            // Synchronous on purpose: keeps chunks strictly in order and avoids per-chunk waits
+            handleIncomingData(data) {
+                if (data === null || data === undefined) return;
 
-                if (data.type === 'chat') {
-                    this.appendChatMessage(data, false);
-                    return;
-                }
+                // Control messages arrive as JSON strings
+                if (typeof data === 'string') {
+                    let msg;
+                    try { msg = JSON.parse(data); } catch (e) { return; }
 
-                if (data.type === 'file-meta') {
-                    this.incomingFileMeta = data;
-                    this.incomingFileTransferId = data.transferId;
-                    this.incomingFileBuffers = [];
-                    this.incomingFileSizeReceived = 0;
-                    this.showTransferProgress('receive', data.name, data.size);
-                    await this.nextFrame();
-                    return;
-                }
-
-                if (data.type === 'file-chunk') {
-                    if (!this.incomingFileMeta ||
-                        data.transferId !== this.incomingFileTransferId) {
-                        return;
-                    }
-
-                    try {
-                        const buffer = await this.chunkToArrayBuffer(data.chunk);
-                        this.incomingFileBuffers.push(buffer);
-                        this.incomingFileSizeReceived += buffer.byteLength;
-                        this.updateTransferProgress('receive', this.incomingFileSizeReceived, this.incomingFileMeta.size);
-                        await this.nextFrame();
-
-                        if (this.incomingFileSizeReceived >= this.incomingFileMeta.size &&
-                            data.isLast === true) {
+                    if (msg.type === 'chat') {
+                        this.appendChatMessage(msg, false);
+                    } else if (msg.type === 'file-meta') {
+                        this.incomingFileMeta = msg;
+                        this.incomingFileTransferId = msg.transferId;
+                        this.incomingFileBuffers = [];
+                        this.incomingFileSizeReceived = 0;
+                        this.showTransferProgress('receive', msg.name, msg.size);
+                    } else if (msg.type === 'file-end') {
+                        if (this.incomingFileMeta && msg.transferId === this.incomingFileTransferId) {
                             this.finishIncomingFile();
                         }
-                    } catch (error) {
-                        console.error('File chunk error:', error);
                     }
                     return;
                 }
 
-                if (data.type === 'file-end') {
-                    if (!this.incomingFileMeta ||
-                        data.transferId !== this.incomingFileTransferId) {
-                        return;
-                    }
+                // Binary file chunk
+                if (!this.incomingFileMeta) return;
 
+                let buffer;
+                if (data instanceof ArrayBuffer) {
+                    buffer = data;
+                } else if (ArrayBuffer.isView(data)) {
+                    buffer = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+                } else {
+                    return;
+                }
+
+                this.incomingFileBuffers.push(buffer);
+                this.incomingFileSizeReceived += buffer.byteLength;
+                this.updateTransferProgress('receive', this.incomingFileSizeReceived, this.incomingFileMeta.size);
+
+                if (this.incomingFileSizeReceived >= this.incomingFileMeta.size) {
                     this.finishIncomingFile();
                 }
-            }
-
-            async chunkToArrayBuffer(chunk) {
-                if (chunk instanceof ArrayBuffer) {
-                    return chunk;
-                }
-
-                if (ArrayBuffer.isView(chunk)) {
-                    return chunk.buffer.slice(
-                        chunk.byteOffset,
-                        chunk.byteOffset + chunk.byteLength
-                    );
-                }
-
-                if (chunk instanceof Blob) {
-                    return await chunk.arrayBuffer();
-                }
-
-                if (chunk && typeof chunk === 'object') {
-                    const values = Object.keys(chunk)
-                        .sort((a, b) => Number(a) - Number(b))
-                        .map(key => Number(chunk[key]));
-                    return new Uint8Array(values).buffer;
-                }
-
-                throw new Error('Unsupported binary chunk type');
             }
 
             finishIncomingFile() {
@@ -721,8 +699,8 @@
                     type: meta.fileType || 'application/octet-stream'
                 });
 
-                this.completeTransferProgress('receive');
-                this.renderReceivedFile(blob, meta.name, meta.size);
+                this.updateTransferProgress('receive', meta.size, meta.size, true);
+                this.renderReceivedFile(blob, meta.name, meta.size, meta.hash || 'secure');
 
                 this.incomingFileMeta = null;
                 this.incomingFileTransferId = null;
@@ -730,18 +708,19 @@
                 this.incomingFileSizeReceived = 0;
             }
 
+            // Event-based backpressure (no polling timers)
             async waitForSendBuffer() {
                 const channel = this.conn && this.conn.dataChannel;
                 if (!channel) return;
+                if (channel.bufferedAmount <= BUFFER_HIGH) return;
 
-                // Dynamically throttle based on buffer depth to maintain peak pipeline speed (VPN optimized)
-                while (channel.bufferedAmount > (8 * 1024 * 1024)) {
-                    await new Promise(resolve => setTimeout(resolve, 5));
-                }
-            }
-
-            nextFrame() {
-                return new Promise(resolve => requestAnimationFrame(() => resolve()));
+                await new Promise(resolve => {
+                    const onLow = () => {
+                        channel.removeEventListener('bufferedamountlow', onLow);
+                        resolve();
+                    };
+                    channel.addEventListener('bufferedamountlow', onLow);
+                });
             }
 
             async computeSHA256(arrayBuffer) {
@@ -758,6 +737,7 @@
                 const idleBox = document.getElementById('transferIdleBox');
                 if (idleBox) idleBox.classList.add('hidden');
 
+                // Receiver side: progress bar only, no status pill / notification text
                 if (type === 'send') {
                     const status = document.getElementById('transferOverallStatus');
                     if (status) {
@@ -767,6 +747,7 @@
                 }
 
                 this.transferStartTime = performance.now();
+                this.lastUiUpdate = 0;
 
                 if (type === 'send') {
                     document.getElementById('sendProgressBlock')?.classList.remove('hidden');
@@ -783,53 +764,39 @@
                 }
             }
 
-            updateTransferProgress(type, loaded, total) {
+            // Throttled to ~10 DOM updates/sec so UI work never slows the transfer
+            updateTransferProgress(type, loaded, total, force = false) {
+                const now = performance.now();
+                if (!force && loaded < total && (now - this.lastUiUpdate) < 100) return;
+                this.lastUiUpdate = now;
+
                 const percent = total > 0
                     ? Math.min(100, Math.round((loaded / total) * 100))
                     : 0;
 
-                const elapsedSec = (performance.now() - (this.transferStartTime || performance.now())) / 1000;
+                const elapsedSec = (now - (this.transferStartTime || now)) / 1000;
                 if (elapsedSec > 0.1) {
                     const speedBps = loaded / elapsedSec;
-                    const speedStr = this.formatBytes(speedBps) + '/s';
                     const speedEl = document.getElementById('diagSpeed');
-                    if (speedEl) speedEl.textContent = speedStr;
+                    if (speedEl) speedEl.textContent = this.formatBytes(speedBps) + '/s';
                 }
 
-                if (type === 'send') {
-                    const bar = document.getElementById('sendProgressBar');
-                    const pct = document.getElementById('sendPercent');
-                    const bytes = document.getElementById('sendBytes');
-                    if (bar) bar.style.width = percent + '%';
-                    if (pct) pct.textContent = percent + '%';
-                    if (bytes) {
-                        bytes.textContent = this.formatBytes(loaded) + ' / ' + this.formatBytes(total);
-                    }
-                } else {
-                    const bar = document.getElementById('receiveProgressBar');
-                    const pct = document.getElementById('receivePercent');
-                    const bytes = document.getElementById('receiveBytes');
-                    if (bar) bar.style.width = percent + '%';
-                    if (pct) pct.textContent = percent + '%';
-                    if (bytes) {
-                        bytes.textContent = this.formatBytes(loaded) + ' / ' + this.formatBytes(total);
-                    }
-                }
+                const prefix = type === 'send' ? 'send' : 'receive';
+                const bar = document.getElementById(prefix + 'ProgressBar');
+                const pct = document.getElementById(prefix + 'Percent');
+                const bytes = document.getElementById(prefix + 'Bytes');
+                if (bar) bar.style.width = percent + '%';
+                if (pct) pct.textContent = percent + '%';
+                if (bytes) bytes.textContent = this.formatBytes(loaded) + ' / ' + this.formatBytes(total);
             }
 
-            completeTransferProgress(type) {
-                this.updateTransferProgress(
-                    type,
-                    type === 'send' ? this.currentSendingSize : this.incomingFileSizeReceived,
-                    type === 'send' ? this.currentSendingTotal : (this.incomingFileMeta?.size || 0)
-                );
+            completeSendProgress() {
+                this.updateTransferProgress('send', this.currentSendingTotal, this.currentSendingTotal, true);
 
-                if (type === 'send') {
-                    const status = document.getElementById('transferOverallStatus');
-                    if (status) {
-                        status.textContent = 'Sent Securely (Verified)';
-                        status.className = "text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
-                    }
+                const status = document.getElementById('transferOverallStatus');
+                if (status) {
+                    status.textContent = 'Sent Securely (Verified)';
+                    status.className = "text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
                 }
             }
 
@@ -843,24 +810,21 @@
                 }
 
                 for (const file of files) {
-                    this.currentSendingSize = 0;
                     this.currentSendingTotal = file.size;
 
                     const transferId =
-                    Date.now().toString(36) + '-' +
-                    (++this.fileTransferCounter).toString(36) + '-' +
+                        Date.now().toString(36) + '-' +
+                        (++this.fileTransferCounter).toString(36) + '-' +
                         Math.random().toString(36).substring(2, 8);
 
                     try {
                         this.showTransferProgress('send', file.name, file.size);
-                        await this.nextFrame();
 
-                        // Compute fast cryptographic integrity hash of file sample for secure update validation
-                        const sliceSample = file.slice(0, Math.min(file.size, 1024 * 64));
-                        const sampleBuffer = await sliceSample.arrayBuffer();
+                        // Integrity hash of the first 64KB
+                        const sampleBuffer = await file.slice(0, Math.min(file.size, 64 * 1024)).arrayBuffer();
                         const fileHash = await this.computeSHA256(sampleBuffer);
 
-                        this.conn.send({
+                        this.sendControl({
                             type: 'file-meta',
                             transferId: transferId,
                             name: file.name,
@@ -869,41 +833,28 @@
                             hash: fileHash
                         });
 
-                        // Optimized 256KB chunk size for high speed over VPN / high bandwidth links
-                        const chunkSize = 256 * 1024;
-                        let offset = 0;
+                        // Read in 1MB blocks, send as 64KB raw chunks
+                        let sent = 0;
+                        while (sent < file.size) {
+                            const block = await file.slice(sent, sent + READ_BLOCK).arrayBuffer();
 
-                        while (offset < file.size) {
-                            const slice = file.slice(offset, offset + chunkSize);
-                            const buffer = await slice.arrayBuffer();
-
-                            await this.waitForSendBuffer();
-
-                            this.conn.send({
-                                type: 'file-chunk',
-                                transferId: transferId,
-                                chunk: buffer,
-                                isLast: (offset + buffer.byteLength) >= file.size
-                            });
-
-                            offset += buffer.byteLength;
-                            this.currentSendingSize = offset;
-                            this.updateTransferProgress('send', offset, file.size);
-                            if (offset % (2 * 1024 * 1024) === 0) {
-                                await this.nextFrame();
+                            for (let o = 0; o < block.byteLength; o += CHUNK_SIZE) {
+                                await this.waitForSendBuffer();
+                                const len = Math.min(CHUNK_SIZE, block.byteLength - o);
+                                this.conn.send(new Uint8Array(block, o, len));
+                                sent += len;
+                                this.updateTransferProgress('send', sent, file.size);
                             }
                         }
 
-                        await this.waitForSendBuffer();
-
-                        this.conn.send({
+                        this.sendControl({
                             type: 'file-end',
                             transferId: transferId,
                             name: file.name,
                             size: file.size
                         });
 
-                        this.completeTransferProgress('send');
+                        this.completeSendProgress();
                         this.renderSentFile(file.name, file.size, fileHash);
 
                     } catch (error) {
@@ -951,7 +902,7 @@
                         <div class="bg-sky-500/10 text-sky-400 p-2.5 rounded-xl"><i class="fa-solid fa-file-shield"></i></div>
                         <div class="truncate">
                             <p class="text-xs font-semibold text-slate-200 truncate">${this.escapeHtml(name)}</p>
-                            <p class="text-[10px] text-slate-500">Received • ${this.formatBytes(size)} • Hash: <span class="text-sky-400 font-mono">${hash}</span></p>
+                            <p class="text-[10px] text-slate-500">Received • ${this.formatBytes(size)} • Hash: <span class="text-sky-400 font-mono">${this.escapeHtml(String(hash))}</span></p>
                         </div>
                     </div>
                     <a href="${url}" download="${safeName}" class="bg-sky-600 hover:bg-sky-500 text-white text-xs px-3 py-1.5 rounded-xl transition-colors font-medium flex items-center space-x-1.5 shadow-md shadow-sky-600/20">
