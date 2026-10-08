@@ -141,6 +141,28 @@
                                     <i class="fa-solid fa-copy text-xs"></i>
                                 </button>
                             </div>
+
+                            <!-- Share button + options -->
+                            <div class="relative mt-3">
+                                <button onclick="app.toggleShareMenu(event)" id="shareBtn" class="w-full flex items-center justify-center gap-2 bg-brand-600 hover:bg-brand-500 text-white font-semibold py-2.5 rounded-xl transition-colors text-xs shadow-md shadow-brand-600/20">
+                                    <i class="fa-solid fa-share-nodes"></i>
+                                    <span>Share Link</span>
+                                </button>
+                                <div id="shareMenu" class="hidden absolute z-20 left-0 right-0 mt-2 bg-slate-950 border border-slate-800 rounded-2xl shadow-xl p-1.5 space-y-1">
+                                    <a id="shareWhatsApp" href="#" target="_blank" rel="noopener" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors">
+                                        <i class="fa-brands fa-whatsapp text-emerald-400 text-base w-5 text-center"></i>
+                                        <span>WhatsApp</span>
+                                    </a>
+                                    <a id="shareEmail" href="#" class="flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors">
+                                        <i class="fa-solid fa-envelope text-sky-400 text-base w-5 text-center"></i>
+                                        <span>Email</span>
+                                    </a>
+                                    <button onclick="app.copyShareableLink()" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium text-slate-200 hover:bg-slate-800 transition-colors text-left">
+                                        <i class="fa-solid fa-copy text-slate-400 text-base w-5 text-center"></i>
+                                        <span id="copyLinkLabel">Copy Link</span>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                         
                         <!-- QR Code Wrapper -->
@@ -358,6 +380,14 @@
                 this.fileTransferCounter = 0;
                 this.lastUiUpdate = 0;
 
+                document.addEventListener('click', (e) => {
+                    const menu = document.getElementById('shareMenu');
+                    const btn = document.getElementById('shareBtn');
+                    if (!menu || menu.classList.contains('hidden')) return;
+                    if (menu.contains(e.target) || (btn && btn.contains(e.target))) return;
+                    menu.classList.add('hidden');
+                });
+
                 window.addEventListener('load', () => {
                     const hash = window.location.hash.replace('#', '');
                     if (hash && hash.startsWith('room-')) {
@@ -417,6 +447,7 @@
                 
                 const shareUrl = window.location.origin + window.location.pathname + '#' + this.roomId;
                 document.getElementById('shareableLinkInput').value = shareUrl;
+                this.updateShareLinks(shareUrl);
 
                 const qrContainer = document.getElementById('qrcode');
                 qrContainer.innerHTML = "";
@@ -541,10 +572,45 @@
                 });
             }
 
-            copyShareableLink() {
+            toggleShareMenu(event) {
+                if (event) event.stopPropagation();
+                document.getElementById('shareMenu').classList.toggle('hidden');
+            }
+
+            updateShareLinks(url) {
+                const message = 'Join me on DeviceLink to share files directly: ' + url;
+                const wa = document.getElementById('shareWhatsApp');
+                const mail = document.getElementById('shareEmail');
+                if (wa) wa.href = 'https://wa.me/?text=' + encodeURIComponent(message);
+                if (mail) {
+                    mail.href = 'mailto:?subject=' + encodeURIComponent('Join my DeviceLink room') +
+                        '&body=' + encodeURIComponent(message);
+                }
+            }
+
+            async copyShareableLink() {
                 const input = document.getElementById('shareableLinkInput');
-                input.select();
-                document.execCommand('copy');
+                const text = input.value;
+                let copied = false;
+
+                try {
+                    if (navigator.clipboard && window.isSecureContext) {
+                        await navigator.clipboard.writeText(text);
+                        copied = true;
+                    }
+                } catch (e) { /* fall back below */ }
+
+                if (!copied) {
+                    input.select();
+                    input.setSelectionRange(0, text.length);
+                    try { copied = document.execCommand('copy'); } catch (e) { copied = false; }
+                }
+
+                const label = document.getElementById('copyLinkLabel');
+                if (label) {
+                    label.textContent = copied ? 'Copied!' : 'Press Ctrl+C to copy';
+                    setTimeout(() => { label.textContent = 'Copy Link'; }, 1500);
+                }
             }
 
             sendControl(obj) {
