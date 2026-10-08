@@ -369,8 +369,6 @@
                 });
             }
 
-            // Notice: Toast notifications removed in favor of the large on-page progress box and inline status logs.
-
             updateStatusBadge(state, text) {
                 const badge = document.getElementById('connectionStatusBadge');
                 const dot = document.getElementById('statusDot');
@@ -745,10 +743,13 @@
                 const idleBox = document.getElementById('transferIdleBox');
                 if (idleBox) idleBox.classList.add('hidden');
 
-                const status = document.getElementById('transferOverallStatus');
-                if (status) {
-                    status.textContent = type === 'send' ? 'Turbo Sending Active' : 'Turbo Receiving Active';
-                    status.className = "text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20";
+                // Receiver side: progress bar only, no status pill / notification text
+                if (type === 'send') {
+                    const status = document.getElementById('transferOverallStatus');
+                    if (status) {
+                        status.textContent = 'Turbo Sending Active';
+                        status.className = "text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-brand-500/10 text-brand-400 border border-brand-500/20";
+                    }
                 }
 
                 this.transferStartTime = performance.now();
@@ -809,10 +810,13 @@
                     type === 'send' ? this.currentSendingTotal : (this.incomingFileMeta?.size || 0)
                 );
 
-                const status = document.getElementById('transferOverallStatus');
-                if (status) {
-                    status.textContent = type === 'send' ? 'Sent Securely (Verified)' : 'Received Securely (Verified)';
-                    status.className = "text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                // Receiver side: only the progress bar updates, no completion notification text
+                if (type === 'send') {
+                    const status = document.getElementById('transferOverallStatus');
+                    if (status) {
+                        status.textContent = 'Sent Securely (Verified)';
+                        status.className = "text-[10px] font-medium px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20";
+                    }
                 }
             }
 
